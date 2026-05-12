@@ -112,12 +112,12 @@ else
   fi
 fi
 
-# Resolve uvx path once — used by all client config sections below
-UVX_PATH="$(which uvx 2>/dev/null || echo "")"
-
-# Pre-cache Serena so first use is fast
-info "Pre-fetching Serena via uvx (this may take a moment on first run)..."
-uvx --from git+https://github.com/oraios/serena serena --help &>/dev/null && ok "Serena cached" || warn "Pre-fetch failed — will download on first use"
+# Install Serena as a uv-managed tool before wiring clients. The resolved
+# executable path is baked into client configs so GUI apps do not depend on
+# shell startup files for PATH.
+bash "$REPO_DIR/scripts/install_serena.sh"
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+SERENA_PATH="$(command -v serena 2>/dev/null || echo "")"
 
 # -----------------------------------------------------------------------------
 # 1b. RTK (Rust Token Killer) — standalone CLI, no client wiring
@@ -171,21 +171,20 @@ else
     read -r -p "  Serena already configured. Update Claude Code MCP entry? [y/N] " _cc_answer
     _cc_answer="${_cc_answer:-N}"
   else
-    read -r -p "  Install Serena into Claude Code? [Y/n] " _cc_answer
+    read -r -p "  Configure Serena in Claude Code? [Y/n] " _cc_answer
     _cc_answer="${_cc_answer:-Y}"
   fi
 
   if [[ "$_cc_answer" =~ ^[Yy] ]]; then
-    if [[ -z "$UVX_PATH" ]]; then
-      warn "uvx not found in PATH — cannot register Claude Code MCP. Re-run after fixing PATH."
+    if [[ -z "$SERENA_PATH" ]]; then
+      warn "serena not found in PATH — cannot register Claude Code MCP. Re-run 'make install-serena-agent' after fixing PATH."
     else
       claude mcp remove serena 2>/dev/null || true
       claude mcp add -s user serena -- \
-        "$UVX_PATH" --from git+https://github.com/oraios/serena \
-        serena start-mcp-server \
+        "$SERENA_PATH" start-mcp-server \
         --context claude-code \
         --project-from-cwd
-      ok "Serena added to Claude Code global MCP (uvx: $UVX_PATH)."
+      ok "Serena added to Claude Code global MCP (serena: $SERENA_PATH)."
     fi
   else
     info "Skipped Claude Code setup."
@@ -221,20 +220,20 @@ else
     read -r -p "  Serena already configured. Update VS Code MCP entry? [y/N] " _vs_answer
     _vs_answer="${_vs_answer:-N}"
   else
-    read -r -p "  Install Serena into VS Code? [Y/n] " _vs_answer
+    read -r -p "  Configure Serena in VS Code? [Y/n] " _vs_answer
     _vs_answer="${_vs_answer:-Y}"
   fi
 
   if [[ "$_vs_answer" =~ ^[Yy] ]]; then
-    if [[ -z "$UVX_PATH" ]]; then
-      warn "uvx not found in PATH — cannot configure VS Code. Re-run after fixing PATH."
+    if [[ -z "$SERENA_PATH" ]]; then
+      warn "serena not found in PATH — cannot configure VS Code. Re-run 'make install-serena-agent' after fixing PATH."
     else
-      python3 - "$VSCODE_MCP" "$REPO_DIR/templates/vscode-mcp-snippet.json" "$UVX_PATH" <<'PYEOF'
+      python3 - "$VSCODE_MCP" "$REPO_DIR/templates/vscode-mcp-snippet.json" "$SERENA_PATH" <<'PYEOF'
 import json, sys, os, shutil
 
 mcp_path    = sys.argv[1]
 snippet_path = sys.argv[2]
-uvx_path    = sys.argv[3]
+serena_path = sys.argv[3]
 
 existing = {}
 if os.path.exists(mcp_path):
@@ -249,8 +248,8 @@ with open(snippet_path) as f:
     snippet = json.load(f)
 
 for server in snippet.get("servers", {}).values():
-    if server.get("command") == "uvx":
-        server["command"] = uvx_path
+    if server.get("command") == "serena":
+        server["command"] = serena_path
 
 existing.setdefault("servers", {}).update(snippet["servers"])
 
@@ -258,7 +257,7 @@ with open(mcp_path, "w") as f:
     json.dump(existing, f, indent=2)
     f.write("\n")
 
-print(f"  [✓] Wrote serena to {mcp_path} (uvx: {uvx_path})")
+print(f"  [✓] Wrote serena to {mcp_path} (serena: {serena_path})")
 PYEOF
     fi
 
@@ -293,16 +292,17 @@ PYEOF
 fi
 
 # WSL note: if using VS Code Remote-WSL the mcp.json lives on the Windows side.
-# The Windows-side config must invoke uvx via wsl.exe since the binary is a
-# Linux executable.
+# The Windows-side config must invoke the Linux serena binary via wsl.exe.
 if [[ "$OS" == "wsl" ]]; then
   WIN_APPDATA="$(win_appdata)"
   WIN_MCP="$WIN_APPDATA/Code/User/mcp.json"
-  if [[ -d "$(dirname "$WIN_MCP")" ]]; then
+  if [[ -z "$SERENA_PATH" ]]; then
+    warn "serena not found in PATH — cannot configure Windows-side VS Code. Re-run 'make install-serena-agent' after fixing PATH."
+  elif [[ -d "$(dirname "$WIN_MCP")" ]]; then
     info "WSL detected: also updating Windows-side VS Code mcp.json..."
-    python3 - "$WIN_MCP" "$REPO_DIR/templates/vscode-mcp-snippet.json" "${UVX_PATH:-uvx}" <<'PYEOF'
+    python3 - "$WIN_MCP" "$REPO_DIR/templates/vscode-mcp-snippet.json" "$SERENA_PATH" <<'PYEOF'
 import json, sys, os, shutil
-mcp_path, snippet_path, uvx_path = sys.argv[1], sys.argv[2], sys.argv[3]
+mcp_path, snippet_path, serena_path = sys.argv[1], sys.argv[2], sys.argv[3]
 existing = {}
 if os.path.exists(mcp_path):
     with open(mcp_path) as f:
@@ -311,16 +311,16 @@ if os.path.exists(mcp_path):
     shutil.copy2(mcp_path, mcp_path + ".bak")
 with open(snippet_path) as f:
     snippet = json.load(f)
-# On WSL, Windows-side VS Code must call uvx through wsl.exe
+# On WSL, Windows-side VS Code must call the Linux serena binary through wsl.exe
 for name, server in snippet.get("servers", {}).items():
-    if server.get("command") in ("uvx", uvx_path):
+    if server.get("command") in ("serena", serena_path):
         server["command"] = "wsl.exe"
-        server["args"] = ["--", uvx_path] + server.get("args", [])
+        server["args"] = ["--", serena_path] + server.get("args", [])
 existing.setdefault("servers", {}).update(snippet["servers"])
 with open(mcp_path, "w") as f:
     json.dump(existing, f, indent=2)
     f.write("\n")
-print(f"  [✓] Wrote serena to {mcp_path} (via wsl.exe → {uvx_path})")
+print(f"  [✓] Wrote serena to {mcp_path} (via wsl.exe → {serena_path})")
 PYEOF
   fi
 fi
@@ -349,17 +349,17 @@ else
     read -r -p "  Serena already configured. Update Cursor MCP entry? [y/N] " _cur_answer
     _cur_answer="${_cur_answer:-N}"
   else
-    read -r -p "  Install Serena into Cursor? [Y/n] " _cur_answer
+    read -r -p "  Configure Serena in Cursor? [Y/n] " _cur_answer
     _cur_answer="${_cur_answer:-Y}"
   fi
 
   if [[ "$_cur_answer" =~ ^[Yy] ]]; then
-    if [[ -z "$UVX_PATH" ]]; then
-      warn "uvx not found in PATH — cannot configure Cursor. Re-run after fixing PATH."
+    if [[ -z "$SERENA_PATH" ]]; then
+      warn "serena not found in PATH — cannot configure Cursor. Re-run 'make install-serena-agent' after fixing PATH."
     elif [[ -f "$CURSOR_MCP" ]]; then
-      python3 - "$CURSOR_MCP" "$CURSOR_TEMPLATE" "$UVX_PATH" <<'PYEOF'
+      python3 - "$CURSOR_MCP" "$CURSOR_TEMPLATE" "$SERENA_PATH" <<'PYEOF'
 import json, sys, os, shutil
-existing_path, template_path, uvx_path = sys.argv[1], sys.argv[2], sys.argv[3]
+existing_path, template_path, serena_path = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(existing_path) as f:
     try:
         existing = json.load(f)
@@ -370,8 +370,8 @@ with open(template_path) as f:
     template = json.load(f)
 
 for server in template.get("mcpServers", {}).values():
-    if server.get("command") == "uvx":
-        server["command"] = uvx_path
+    if server.get("command") == "serena":
+        server["command"] = serena_path
 
 existing.setdefault("mcpServers", {})
 existing["mcpServers"].update(template["mcpServers"])
@@ -380,21 +380,21 @@ shutil.copy2(existing_path, existing_path + ".bak")
 with open(existing_path, "w") as f:
     json.dump(existing, f, indent=2)
     f.write("\n")
-print(f"  [✓] Merged serena into {existing_path} (uvx: {uvx_path})")
+print(f"  [✓] Merged serena into {existing_path} (serena: {serena_path})")
 PYEOF
     else
-      python3 - "$CURSOR_TEMPLATE" "$CURSOR_MCP" "$UVX_PATH" <<'PYEOF'
+      python3 - "$CURSOR_TEMPLATE" "$CURSOR_MCP" "$SERENA_PATH" <<'PYEOF'
 import json, sys
-template_path, out_path, uvx_path = sys.argv[1], sys.argv[2], sys.argv[3]
+template_path, out_path, serena_path = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(template_path) as f:
     template = json.load(f)
 for server in template.get("mcpServers", {}).values():
-    if server.get("command") == "uvx":
-        server["command"] = uvx_path
+    if server.get("command") == "serena":
+        server["command"] = serena_path
 with open(out_path, "w") as f:
     json.dump(template, f, indent=2)
     f.write("\n")
-print(f"  [✓] Created {out_path} (uvx: {uvx_path})")
+print(f"  [✓] Created {out_path} (serena: {serena_path})")
 PYEOF
     fi
   else
@@ -448,18 +448,18 @@ if claude_desktop_app_installed; then
     read -r -p "  Serena already configured. Update Claude Desktop MCP entry? [y/N] " _cd_answer
     _cd_answer="${_cd_answer:-N}"
   else
-    read -r -p "  Install Serena into Claude Desktop? [Y/n] " _cd_answer
+    read -r -p "  Configure Serena in Claude Desktop? [Y/n] " _cd_answer
     _cd_answer="${_cd_answer:-Y}"
   fi
 
   if [[ "$_cd_answer" =~ ^[Yy] ]]; then
-    if [[ -z "$UVX_PATH" ]]; then
-      warn "uvx not found in PATH — cannot configure Claude Desktop. Re-run after fixing PATH."
+    if [[ -z "$SERENA_PATH" ]]; then
+      warn "serena not found in PATH — cannot configure Claude Desktop. Re-run 'make install-serena-agent' after fixing PATH."
     else
-      python3 - "$CLAUDE_DESKTOP_CONFIG" "$CLAUDE_DESKTOP_TEMPLATE" "$UVX_PATH" "$OS" <<'PYEOF'
+      python3 - "$CLAUDE_DESKTOP_CONFIG" "$CLAUDE_DESKTOP_TEMPLATE" "$SERENA_PATH" "$OS" <<'PYEOF'
 import json, sys, os, shutil
 
-config_path, template_path, uvx_path, os_type = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+config_path, template_path, serena_path, os_type = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 
 if os.path.exists(config_path):
     with open(config_path) as f:
@@ -474,14 +474,14 @@ else:
 with open(template_path) as f:
     template = json.load(f)
 
-# Substitute resolved uvx path; on WSL wrap through wsl.exe for Windows-side app
+# Substitute resolved serena path; on WSL wrap through wsl.exe for Windows-side app
 for server in template.get("mcpServers", {}).values():
-    if server.get("command") in ("uvx", uvx_path):
+    if server.get("command") in ("serena", serena_path):
         if os_type == "wsl":
             server["command"] = "wsl.exe"
-            server["args"] = ["--", uvx_path] + server.get("args", [])
+            server["args"] = ["--", serena_path] + server.get("args", [])
         else:
-            server["command"] = uvx_path
+            server["command"] = serena_path
 
 config.setdefault("mcpServers", {})
 config["mcpServers"].update(template["mcpServers"])
@@ -494,7 +494,7 @@ with open(config_path, "w") as f:
     json.dump(config, f, indent=2)
     f.write("\n")
 
-print(f"  [✓] Merged serena into {config_path} (uvx: {uvx_path})")
+print(f"  [✓] Merged serena into {config_path} (serena: {serena_path})")
 print(f"  [!] Restart Claude Desktop to pick up the new MCP server.")
 PYEOF
     fi
@@ -516,6 +516,7 @@ bash "$REPO_DIR/scripts/install-graphify.sh"
 section "Script permissions"
 chmod +x "$REPO_DIR/scripts/setup-project.sh"
 chmod +x "$REPO_DIR/scripts/setup-all-projects.sh"
+chmod +x "$REPO_DIR/scripts/install_serena.sh"
 chmod +x "$REPO_DIR/scripts/install-rtk.sh"
 chmod +x "$REPO_DIR/scripts/install-graphify.sh"
 chmod +x "$REPO_DIR/bin/dev-ai-tools"
@@ -556,7 +557,7 @@ esac
 section "Complete"
 echo
 echo "dev-ai-tools installed:"
-echo "  • Serena     — semantic code intelligence MCP"
+echo "  • Serena     — semantic code intelligence MCP (uv-managed serena-agent)"
 echo "      - Claude Code CLI  (global MCP, auto-detects project from cwd)"
 echo "      - VS Code          (user mcp.json; on WSL also syncs Windows-side via wsl.exe)"
 echo "      - Cursor IDE       (~/.cursor/mcp.json, auto-detects project from cwd)"

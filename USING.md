@@ -21,7 +21,7 @@ make check
 dev-ai-tools check
 ```
 
-Expected output: a `[✓]` for each of uv, `~/.serena/serena_config.yml`, Claude Code MCP, Cursor, VS Code, Claude Desktop (if installed), Graphify, RTK. Any `[✗]` tells you exactly which `make install-*` target to run. `dev-ai-tools check` additionally reports whether the current project has `.serena/project.yml`, graphify rules in `CLAUDE.md` / `AGENTS.md`, and a built graph.
+Expected output: a `[✓]` for each of uv, Serena CLI, `~/.serena/serena_config.yml`, Claude Code MCP, Cursor, VS Code, Claude Desktop (if installed), Graphify, RTK. Any `[✗]` tells you exactly which `make install-*` target to run. `dev-ai-tools check` additionally reports whether the current project has `.serena/project.yml`, graphify rules in `CLAUDE.md` / `AGENTS.md`, and a built graph.
 
 ---
 
@@ -176,7 +176,7 @@ Then `source ~/.zshrc`. Linux distros and WSL usually have `~/.local/bin` on `PA
 
 | Symptom | Fix |
 |---|---|
-| `/mcp` shows `serena ✘ failed` | `make check` → likely uvx PATH issue → `make setup` re-registers with the absolute uvx path |
+| `/mcp` shows `serena ✘ failed` | `make check` → likely missing/stale `serena` path → `make setup` re-registers with the resolved path |
 | `graphify --version` not found | Either `uv tool install graphifyy` didn't run or `~/.local/bin` isn't on PATH — `make install-graphify`, then `uv tool update-shell` |
 | `rtk` not found | `make install-rtk` (brew on macOS when present, else curl) |
 | Graphify rules or hook missing in a client | Re-run `make install-graphify` and accept the per-client prompt; or run `graphify <client> install` directly (Claude Code, Codex, Cursor, VS Code, and others are supported — see `graphify --help`) |

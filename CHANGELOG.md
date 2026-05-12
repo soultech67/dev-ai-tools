@@ -12,6 +12,12 @@ make update VERSION=v0.5.1
 
 ## [Unreleased]
 
+### Added
+- `scripts/install_serena.sh` and `make install-serena-agent` install/update Serena as a uv-managed `serena-agent` tool following Serena's current quick-start command.
+
+### Changed
+- `make setup` now installs Serena before wiring MCP clients, and writes client configs that launch the resolved `serena` executable instead of running Serena on demand through `uvx`.
+
 ## [0.5.4] - 2026-04-24
 
 ### Added
