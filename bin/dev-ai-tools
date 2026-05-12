@@ -34,7 +34,7 @@ Usage:
 Per-project commands (operate on the current working directory):
   install-graphify   Install/update Graphify CLI and wire it into this project's clients
   install-serena     Scaffold .serena/ (project.yml + memory templates) in this project
-                     (alias: setup-serena — the global Serena MCP is wired by 'make setup')
+                     (alias: setup-serena — Serena CLI/MCP wiring is handled by 'make setup')
   check              Show per-project wiring status + global tool status
 
 Maintenance commands:

@@ -32,6 +32,11 @@ install-graphify: ## Install Graphify (uv tool install graphifyy) and wire it in
 	@chmod +x $(REPO_DIR)/scripts/install-graphify.sh
 	@bash $(REPO_DIR)/scripts/install-graphify.sh
 
+.PHONY: install-serena-agent
+install-serena-agent: ## Install/update Serena CLI (uv tool install serena-agent)
+	@chmod +x $(REPO_DIR)/scripts/install_serena.sh
+	@bash $(REPO_DIR)/scripts/install_serena.sh
+
 .PHONY: install-rtk
 install-rtk: ## Install RTK (brew on macOS when available, else curl installer)
 	@chmod +x $(REPO_DIR)/scripts/install-rtk.sh
@@ -100,6 +105,14 @@ check: ## Verify Serena, Graphify, and RTK are wired up correctly across all cli
 		echo "  [✓] uv: $$(uv --version)"; \
 	else \
 		echo "  [✗] uv not found — run: make setup"; \
+	fi
+	@echo
+	@echo "── Serena CLI ─────────────────────────────────────"
+	@if command -v serena &>/dev/null; then \
+		_version="$$(serena --version 2>/dev/null | head -1)"; \
+		echo "  [✓] serena: $${_version:-installed}"; \
+	else \
+		echo "  [✗] serena not found — run: make install-serena-agent"; \
 	fi
 	@echo
 	@echo "── ~/.serena/serena_config.yml ─────────────────────"
@@ -196,9 +209,9 @@ check: ## Verify Serena, Graphify, and RTK are wired up correctly across all cli
 	@echo
 
 .PHONY: cache-clean
-cache-clean: ## Force uvx to re-download Serena on next use
-	@uvx cache clean
-	@echo "  [✓] uvx cache cleared — Serena will re-download on next use"
+cache-clean: ## Clean uv's package/tool cache
+	@uv cache clean
+	@echo "  [✓] uv cache cleared — tools will rebuild/download as needed"
 
 .PHONY: lint
 lint: ## Run ShellCheck on all shell scripts (same as CI)

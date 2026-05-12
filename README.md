@@ -41,7 +41,8 @@ make setup
 
 | Command | Description |
 |---|---|
-| `make setup` | Full bootstrap: `uv`, RTK, Serena config + all detected clients, Graphify + per-client wiring, `dev-ai-tools` symlink, language servers |
+| `make setup` | Full bootstrap: `uv`, Serena CLI/config + all detected clients, RTK, Graphify + per-client wiring, `dev-ai-tools` symlink, language servers |
+| `make install-serena-agent` | Install/update the Serena CLI via `uv tool install serena-agent` |
 | `make install-graphify` | Install/update Graphify and offer to wire it into each detected client (targets this repo) |
 | `make install-rtk` | Install/update RTK (brew on macOS when available, else curl) |
 | `make install-lsp` | Scan repos, detect languages, prompt per language to install servers |
@@ -53,7 +54,7 @@ make setup
 | `make check` | Verify Serena, Graphify, and RTK are correctly wired in all detected clients |
 | `make lint` | Run ShellCheck locally against all shell scripts (same config as CI) |
 | `make preflight` | Pre-push checks: working tree clean, lint passes, in sync with origin, no unpushed tags |
-| `make cache-clean` | Force `uvx` to re-download Serena on next use |
+| `make cache-clean` | Clean uv's package/tool cache |
 | `make help` | Show all targets |
 
 `PROJECTS_ROOT` defaults to `~/Projects`; `DEV_AI_TOOLS_BIN` defaults to `~/.local/bin`. Override any target with:
@@ -72,10 +73,10 @@ make install-cli DEV_AI_TOOLS_BIN=/usr/local/bin
 1. Detects platform (macOS / WSL / Linux) and displays it
 2. Validates prerequisites (`python3`, Xcode CLT on macOS)
 3. Installs `uv` (Python package manager) if missing
-4. Pre-fetches Serena via `uvx` so first use is fast
+4. Installs **Serena** as a uv-managed `serena-agent` tool (`uv tool install -p 3.13 serena-agent@latest --prerelease=allow`)
 5. Installs **RTK** — Homebrew on macOS when available, else the official curl installer (skipped/updated idempotently if already present)
 6. Copies `serena_config.yml` → `~/.serena/serena_config.yml`
-7. For each detected client, prompts to install or update Serena:
+7. For each detected client, prompts to configure or update Serena MCP wiring:
    - **Claude Code** — global MCP (`-s user`, `--project-from-cwd`)
    - **VS Code** — dedicated `mcp.json` (also cleans up stale `settings.json` entries; on WSL also syncs Windows-side config)
    - **Cursor** — `~/.cursor/mcp.json` (Linux-side only on WSL)
@@ -117,14 +118,14 @@ Supported languages: Go, Rust, Python (pyright), TypeScript/JS, Ruby, C/C++, C#/
 | `templates/cursor-mcp.json` | Cursor global MCP config (`~/.cursor/mcp.json`) |
 | `templates/claude-desktop-mcp.json` | Claude Desktop MCP config (`claude_desktop_config.json`) |
 | `templates/vscode-mcp-snippet.json` | VS Code MCP entry merged into user `mcp.json` |
+| `scripts/install_serena.sh` | Installs/updates the Serena CLI via `uv tool install serena-agent` |
 | `scripts/install-graphify.sh` | Installs Graphify CLI + prompts to wire it into each detected client |
 | `scripts/install-rtk.sh` | Installs/updates RTK (brew-or-curl) |
 | `scripts/install-language-servers.sh` | Interactive language server installer |
 | `scripts/setup-project.sh` | Creates `.serena/project.yml` in a single project |
 | `scripts/setup-all-projects.sh` | Runs `setup-project.sh` across every project under `~/Projects` |
 
-Serena itself is **not** installed locally — it runs on demand via `uvx`.
-Graphify installs as a managed `uv` tool; RTK installs as a native binary (via brew or the upstream installer).
+Serena installs as a managed `uv` tool (`serena-agent`), and MCP clients are configured with the resolved `serena` executable path. Graphify installs as a managed `uv` tool; RTK installs as a native binary (via brew or the upstream installer).
 
 ---
 
@@ -148,7 +149,7 @@ Graphify installs as a managed `uv` tool; RTK installs as a native binary (via b
 ### Platform-specific behaviour
 
 - **macOS** — validates Xcode CLT is installed; uses `brew` for packages when available; configures Claude Desktop at `/Applications/Claude.app`
-- **WSL** — resolves the Windows username (which may differ from `$USER`); syncs VS Code and Claude Desktop configs to the Windows side; wraps `uvx` commands through `wsl.exe` so Windows-native apps can invoke the Linux binary
+- **WSL** — resolves the Windows username (which may differ from `$USER`); syncs VS Code and Claude Desktop configs to the Windows side; wraps `serena` commands through `wsl.exe` so Windows-native apps can invoke the Linux binary
 - **Linux** — uses `apt-get` (with `sudo` when not root) for system packages
 
 ## Prerequisites
@@ -211,10 +212,9 @@ For a per-workspace override, create `.vscode/mcp.json` in the project:
   "servers": {
     "serena": {
       "type": "stdio",
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/oraios/serena",
-               "serena", "start-mcp-server",
-               "--context", "ide",
+      "command": "serena",
+      "args": ["start-mcp-server",
+               "--context", "vscode",
                "--project", "${workspaceFolder}"]
     }
   }
@@ -280,14 +280,14 @@ Commit `project.yml` and `memories/` so teammates share context. Exclude caches:
 # Pull config changes from this repo and re-run setup
 make update
 
-# Force uvx to re-download the latest Serena release
-make cache-clean
+# Install or update Serena
+make install-serena-agent
 ```
 
-To pin to a specific Serena version, replace the `--from` URL in `templates/cursor-mcp.json`, `templates/claude-desktop-mcp.json`, `templates/vscode-mcp-snippet.json`, and the `claude mcp add` line in `install.sh`:
+To pin to a specific Serena version for one install run, override `SERENA_PACKAGE`:
 
-```
---from git+https://github.com/oraios/serena@<commit-sha>
+```bash
+SERENA_PACKAGE='serena-agent==<version>' make install-serena-agent
 ```
 
 ---
@@ -311,10 +311,10 @@ export PATH="$HOME/.local/bin:$PATH"   # add to ~/.zshrc or ~/.bashrc
 
 ```bash
 make check           # diagnose
-make setup           # re-registers with correct absolute uvx path
+make setup           # re-registers with the resolved serena path
 ```
 
-The most common cause is `uvx` not being in the PATH that Claude Code uses when spawning subprocesses. `make setup` resolves and bakes in the full path automatically.
+The most common cause is the client not being able to find the `serena` executable. `make setup` resolves and bakes in the full path automatically.
 
 **VS Code MCP not working**
 
@@ -335,7 +335,7 @@ Serena writes memories to `.serena/memories/`. If they're missing or gitignored,
 
 **Slow first start**
 
-Expected on first run — `uvx` downloads and caches Serena. `make setup` pre-caches it.
+Expected on first run — `uv` may download Python 3.13 and build Serena's tool environment.
 
 ---
 
